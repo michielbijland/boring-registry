@@ -68,6 +68,10 @@ var (
 	flagAuthOidcAuthURL  string
 	flagAuthOidcAudience string
 
+	// Auth config with multiple OIDC issuers
+	flagAuthConfig       string
+	flagAuthConfigInline string
+
 	// Okta auth
 	flagAuthOktaIssuer   string
 	flagAuthOktaClientId string
@@ -217,6 +221,10 @@ func init() {
 	serverCmd.Flags().StringVar(&flagAuthOidcAuthURL, "auth-oidc-auth-url", "", "Override the OIDC authorization URL returned in .well-known/terraform.json. Defaults to the URL from OIDC discovery")
 	serverCmd.Flags().StringVar(&flagAuthOidcAudience, "auth-oidc-audience", "", "Override the expected audience (aud) claim for JWT verification. Defaults to --auth-oidc-clientid")
 
+	// Auth config options
+	serverCmd.Flags().StringVar(&flagAuthConfig, "auth-config", "", "Path to a YAML auth config file defining OIDC issuers and claim rules")
+	serverCmd.Flags().StringVar(&flagAuthConfigInline, "auth-config-inline", "", "YAML auth config as a string, alternative to --auth-config")
+
 	// Terraform Login Protocol options.
 	serverCmd.Flags().StringVar(&flagAuthOktaClientId, "login-client", "", "The client_id value to use when making requests")
 	serverCmd.Flags().StringSliceVar(&flagLoginGrantTypes, "login-grant-types", []string{"authz_code"}, "An array describing a set of OAuth 2.0 grant types")
@@ -361,13 +369,25 @@ func authMiddleware(ctx context.Context) (endpoint.Middleware, *discovery.LoginV
 		return nil, nil, errors.New("both OIDC and Okta are configured, only one is allowed at a time")
 	}
 
+	cfg, err := loadAuthConfig()
+	if err != nil {
+		return nil, nil, err
+	}
+
+	if cfg != nil && flagAuthOidcIssuer != "" {
+		for _, ic := range cfg.OIDC {
+			if ic.Name == "oidc" {
+				return nil, nil, fmt.Errorf("duplicate oidc issuer name %q: it is reserved for the --auth-oidc-* flags", ic.Name)
+			}
+		}
+	}
+
 	// We construct the discovery.LoginV1 on this level, as we need the OIDC provider to look up the
 	// authorization and token endpoints dynamically to populate the LoginV1
 	var login *discovery.LoginV1
 	if flagAuthOidcIssuer != "" || flagAuthOktaIssuer != "" {
 		var p auth.Provider
 		if flagAuthOidcIssuer != "" {
-			var err error
 			p, login, err = setupOidc(ctx)
 			if err != nil {
 				return nil, nil, err
@@ -376,6 +396,21 @@ func authMiddleware(ctx context.Context) (endpoint.Middleware, *discovery.LoginV
 			p, login = setupOkta()
 		}
 		providers = append(providers, p)
+	}
+
+	if cfg != nil {
+		issuers, issuerLogin, err := setupOidcIssuers(ctx, cfg)
+		if err != nil {
+			return nil, nil, err
+		}
+		providers = append(providers, issuers...)
+
+		if issuerLogin != nil {
+			if login != nil {
+				return nil, nil, errors.New("only one login.v1 source is allowed: use either --auth-oidc-issuer, --auth-okta-issuer, or one auth config issuer with login")
+			}
+			login = issuerLogin
+		}
 	}
 
 	if login != nil { // Can be nil if neither Oidc, Okta, or API token are configured

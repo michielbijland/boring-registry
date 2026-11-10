@@ -22,6 +22,7 @@ nav:
       - Authentication:
           - API Token: configuration/authentication/api-token.md
           - OIDC: configuration/authentication/oidc.md
+          - Auth Config (multiple OIDC issuers): configuration/authentication/auth-config.md
           - Okta: configuration/authentication/okta.md
       - Download Proxy: configuration/download-proxy.md
       - Provider Network Mirror: configuration/provider-network-mirror.md

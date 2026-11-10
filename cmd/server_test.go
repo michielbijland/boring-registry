@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -31,6 +32,12 @@ func TestAuthMiddleware(t *testing.T) {
 	s := httptest.NewServer(http.HandlerFunc(hf))
 	defer s.Close()
 
+	// A separate issuer for the auth config, its discovery document doesn't depend on the legacy flags
+	configIssuer := newDiscoveryServer(t)
+	configWithLogin := fmt.Sprintf("version: 1\noidc:\n  - name: people\n    issuer: %s\n    audience: api-app\n    login:\n      client_id: config-cli\n", configIssuer.URL)
+	configWithoutLogin := fmt.Sprintf("version: 1\noidc:\n  - name: ci\n    issuer: %s\n    audience: boring-registry\n    claims:\n      repository_owner: [frasers-org]\n", configIssuer.URL)
+	configNamedOidc := fmt.Sprintf("version: 1\noidc:\n  - name: oidc\n    issuer: %s\n    audience: boring-registry\n", configIssuer.URL)
+
 	tests := []struct {
 		name             string
 		authOidcIssuer   string
@@ -39,6 +46,7 @@ func TestAuthMiddleware(t *testing.T) {
 		authOktaClientId string
 		authOktaAuthz    string
 		authOktaToken    string
+		authConfigInline string
 		wantErr          bool
 		errMessage       string
 	}{
@@ -62,6 +70,42 @@ func TestAuthMiddleware(t *testing.T) {
 			authOktaAuthz:    "/authz",
 			authOktaToken:    "/token",
 		},
+		{
+			name:             "auth config issuer with login",
+			authConfigInline: configWithLogin,
+		},
+		{
+			name:             "auth config issuer without login and legacy OIDC",
+			authOidcIssuer:   s.URL,
+			authOidcClientId: "boring-registry",
+			authConfigInline: configWithoutLogin,
+		},
+		{
+			name:             "legacy OIDC and auth config issuer with login",
+			authOidcIssuer:   s.URL,
+			authOidcClientId: "boring-registry",
+			authConfigInline: configWithLogin,
+			wantErr:          true,
+			errMessage:       "login.v1",
+		},
+		{
+			name:             "Okta and auth config issuer with login",
+			authOktaIssuer:   "something",
+			authOktaClientId: "boring-registry",
+			authOktaAuthz:    "/authz",
+			authOktaToken:    "/token",
+			authConfigInline: configWithLogin,
+			wantErr:          true,
+			errMessage:       "login.v1",
+		},
+		{
+			name:             "auth config issuer named oidc and legacy OIDC",
+			authOidcIssuer:   s.URL,
+			authOidcClientId: "boring-registry",
+			authConfigInline: configNamedOidc,
+			wantErr:          true,
+			errMessage:       "duplicate",
+		},
 	}
 
 	for _, test := range tests {
@@ -72,18 +116,22 @@ func TestAuthMiddleware(t *testing.T) {
 		flagAuthOktaClientId = test.authOktaClientId
 		flagAuthOktaAuthz = test.authOktaAuthz
 		flagAuthOktaToken = test.authOktaToken
+		flagAuthConfig = ""
+		flagAuthConfigInline = test.authConfigInline
 
 		mw, login, err := authMiddleware(context.Background())
 		if test.wantErr {
-			assert.Error(t, err)
-			assert.ErrorContains(t, err, test.errMessage)
+			assert.Error(t, err, test.name)
+			assert.ErrorContains(t, err, test.errMessage, test.name)
 		} else {
-			assert.NoError(t, err)
-			if assert.NotNil(t, login) {
+			assert.NoError(t, err, test.name)
+			if assert.NotNil(t, login, test.name) {
 				if test.authOidcIssuer != "" {
-					assert.Equal(t, test.authOidcClientId, login.Client)
+					assert.Equal(t, test.authOidcClientId, login.Client, test.name)
 				} else if test.authOktaIssuer != "" {
-					assert.Equal(t, test.authOktaClientId, login.Client)
+					assert.Equal(t, test.authOktaClientId, login.Client, test.name)
+				} else if test.authConfigInline != "" {
+					assert.Equal(t, "config-cli", login.Client, test.name)
 				}
 				assert.NotEmpty(t, login.Authz)
 				assert.NotEmpty(t, login.Token)
@@ -93,4 +141,6 @@ func TestAuthMiddleware(t *testing.T) {
 			assert.NotNil(t, mw)
 		}
 	}
+	flagAuthOidcIssuer, flagAuthOidcClientId, flagAuthOktaIssuer, flagAuthOktaClientId = "", "", "", ""
+	flagAuthOktaAuthz, flagAuthOktaToken, flagAuthConfigInline = "", "", ""
 }

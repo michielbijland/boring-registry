@@ -25,6 +25,8 @@ The following configuration options are available:
 |`--login-grant-types`|`BORING_REGISTRY_LOGIN_GRANT_TYPES`|An array describing a set of OAuth 2.0 grant types (default `[authz_code]`)|
 |`--login-ports`|`BORING_REGISTRY_LOGIN_PORTS`|Inclusive range of TCP ports that the Terraform/OpenTofu CLI may use (default `[10000,10010]`)|
 
+To accept tokens from more than one issuer (e.g. an identity provider for people and GitHub Actions or GitLab CI for pipelines) use the [auth config](auth-config.md).
+
 The remote service discovery resource can be verified after configuring OIDC with:
 ```json
 $ curl -s https://boring-registry.example.com:5601/.well-known/terraform.json | jq

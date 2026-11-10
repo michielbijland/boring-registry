@@ -15,6 +15,7 @@ require (
 	github.com/aws/smithy-go v1.27.4
 	github.com/coreos/go-oidc/v3 v3.20.0
 	github.com/go-git/go-git/v5 v5.19.2
+	github.com/go-jose/go-jose/v4 v4.1.6
 	github.com/go-kit/kit v0.13.0
 	github.com/gorilla/mux v1.8.1
 	github.com/hashicorp/go-version v1.9.0
@@ -31,6 +32,7 @@ require (
 	golang.org/x/oauth2 v0.36.0
 	golang.org/x/sync v0.22.0
 	google.golang.org/api v0.290.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
@@ -88,7 +90,6 @@ require (
 	github.com/fsnotify/fsnotify v1.10.1 // indirect
 	github.com/go-git/gcfg v1.5.1-0.20230307220236-3a3c6141e376 // indirect
 	github.com/go-git/go-billy/v5 v5.9.1 // indirect
-	github.com/go-jose/go-jose/v4 v4.1.6 // indirect
 	github.com/go-kit/log v0.2.1 // indirect
 	github.com/go-logfmt/logfmt v0.6.1 // indirect
 	github.com/go-logr/logr v1.4.4 // indirect
@@ -172,5 +173,4 @@ require (
 	google.golang.org/grpc v1.83.2 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 	gopkg.in/warnings.v0 v0.1.2 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

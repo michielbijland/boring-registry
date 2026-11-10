@@ -7,8 +7,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 )
 
 func TestOidcProviderDiscovery(t *testing.T) {
@@ -39,4 +41,48 @@ func TestOidcProviderDiscovery(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotEmpty(t, provider.AuthURL())
 	assert.NotEmpty(t, provider.TokenURL())
+}
+
+func TestOidcProviderVerify(t *testing.T) {
+	ti := newTestIssuer(t)
+	other := newTestIssuer(t)
+	rules := ClaimRules{"repository_owner": {"frasers-org"}}
+	p, err := NewOidcProvider(context.Background(), ti.URL, "", "boring-registry", WithName("github-actions"), WithClaimRules(rules))
+	require.NoError(t, err)
+	assert.Equal(t, "github-actions", p.String())
+	assert.Equal(t, ti.URL, p.Issuer())
+
+	tests := []struct {
+		name    string
+		token   string
+		wantErr bool
+	}{
+		{"valid token and claims", ti.token(t, map[string]any{"aud": "boring-registry", "repository_owner": "frasers-org"}), false},
+		{"aud as array", ti.token(t, map[string]any{"aud": []string{"other", "boring-registry"}, "repository_owner": "frasers-org"}), false},
+		{"wrong audience", ti.token(t, map[string]any{"aud": "https://github.com/frasers-org", "repository_owner": "frasers-org"}), true},
+		{"claim rule fails", ti.token(t, map[string]any{"aud": "boring-registry", "repository_owner": "evil-org"}), true},
+		{"claim missing", ti.token(t, map[string]any{"aud": "boring-registry"}), true},
+		{"expired", ti.token(t, map[string]any{"aud": "boring-registry", "repository_owner": "frasers-org", "exp": time.Now().Add(-time.Minute).Unix()}), true},
+		{"signed by another issuer key", other.token(t, map[string]any{"iss": ti.URL, "aud": "boring-registry", "repository_owner": "frasers-org"}), true},
+		{"not a JWT", "static-token-value", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := p.Verify(context.Background(), tt.token)
+			if tt.wantErr {
+				assert.Error(t, err)
+			} else {
+				assert.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestOidcProviderDefaultName(t *testing.T) {
+	ti := newTestIssuer(t)
+	p, err := NewOidcProvider(context.Background(), ti.URL, "boring-registry", "")
+	require.NoError(t, err)
+	assert.Equal(t, "oidc", p.String())
+	// Without claim rules any valid token for the audience, which defaults to the client id, is accepted
+	assert.NoError(t, p.Verify(context.Background(), ti.token(t, map[string]any{"aud": "boring-registry"})))
 }

@@ -2,6 +2,7 @@ package auth
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -13,13 +14,34 @@ type OidcProvider struct {
 	issuer           string
 	clientIdentifier string
 	audience         string
+	name             string
+	claimRules       ClaimRules
 	provider         *oidc.Provider
 }
 
-func (p *OidcProvider) String() string { return "oidc" }
+// OidcOption configures optional OidcProvider settings
+type OidcOption func(*OidcProvider)
 
-// Unfortunately, it's difficult to write tests for this method, as we would need an OIDC Authorization Server
-// to generate valid signed JWTs
+// WithName sets the provider name used in logs, it defaults to "oidc"
+func WithName(name string) OidcOption {
+	return func(o *OidcProvider) {
+		o.name = name
+	}
+}
+
+// WithClaimRules sets the claim rules a verified token must also satisfy
+func WithClaimRules(rules ClaimRules) OidcOption {
+	return func(o *OidcProvider) {
+		o.claimRules = rules
+	}
+}
+
+func (o *OidcProvider) String() string { return o.name }
+
+// Issuer returns the issuer URL
+func (o *OidcProvider) Issuer() string { return o.issuer }
+
+// Verify checks the token's signature, expiry, issuer, and audience, and then the claim rules
 func (o *OidcProvider) Verify(ctx context.Context, token string) error {
 	// The go-oidc library uses Config.ClientID to verify the "aud" claim in the JWT.
 	// Some identity providers (e.g. Okta without API Access Management) issue tokens where "aud" doesn't match the OIDC client ID.
@@ -36,8 +58,23 @@ func (o *OidcProvider) Verify(ctx context.Context, token string) error {
 
 	// Check method documentation to see what is verified and what not.
 	// The returned IdToken can be used to verify claims.
-	_, err := verifier.Verify(ctx, token)
-	return err
+	idToken, err := verifier.Verify(ctx, token)
+	if err != nil {
+		return err
+	}
+
+	if len(o.claimRules) == 0 {
+		return nil
+	}
+
+	var claims map[string]any
+	if err := idToken.Claims(&claims); err != nil {
+		return fmt.Errorf("failed to decode token claims: %w", err)
+	}
+	if err := o.claimRules.Match(claims); err != nil {
+		return fmt.Errorf("claim rules not satisfied: %w", err)
+	}
+	return nil
 }
 
 func (o *OidcProvider) AuthURL() string {
@@ -48,7 +85,7 @@ func (o *OidcProvider) TokenURL() string {
 	return o.provider.Endpoint().TokenURL
 }
 
-func NewOidcProvider(ctx context.Context, issuer, clientIdentifier, audience string) (*OidcProvider, error) {
+func NewOidcProvider(ctx context.Context, issuer, clientIdentifier, audience string, opts ...OidcOption) (*OidcProvider, error) {
 	logger := slog.Default()
 	start := time.Now()
 	provider, err := oidc.NewProvider(ctx, issuer)
@@ -58,11 +95,16 @@ func NewOidcProvider(ctx context.Context, issuer, clientIdentifier, audience str
 
 	logger.Info("finished initializing OIDC provider", slog.String("took", time.Since(start).String()))
 
-	return &OidcProvider{
+	o := &OidcProvider{
 		logger:           logger,
 		issuer:           issuer,
 		clientIdentifier: clientIdentifier,
 		audience:         audience,
+		name:             "oidc",
 		provider:         provider,
-	}, nil
+	}
+	for _, opt := range opts {
+		opt(o)
+	}
+	return o, nil
 }
